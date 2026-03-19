@@ -1,0 +1,20 @@
+{
+  "name": "accounts",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "bunx tsc --noEmit",
+    "check:worker": "bunx wrangler deploy --dry-run"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "wrangler": "^4.75.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
+}
