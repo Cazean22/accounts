@@ -499,7 +499,7 @@ if __name__ == "__main__":
     success_count = 0
     while True:
         try:
-            config = run(PROXY_URL)
+            config = run("")
             if config and config.startswith("{"):
                 success_count += 1
                 print(f"[+] 第 {success_count} 个账号注册成功！")
