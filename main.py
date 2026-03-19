@@ -52,8 +52,8 @@ class EMail:
         data = r.json()
         self.address = data["address"]
         self.token = data["token"]
-        print(f"[+] 生成邮箱: {self.address} (TempMail.lol)")
-        print(f"[*] 自动轮询已启动（token 已保存）")
+        # print(f"[+] 生成邮箱: {self.address} (TempMail.lol)")
+        # print(f"[*] 自动轮询已启动（token 已保存）")
 
     def _get_messages(self):
         r = self.s.get(f"https://api.tempmail.lol/v2/inbox?token={self.token}")
@@ -61,17 +61,17 @@ class EMail:
         return r.json().get("emails", [])
 
     def wait_for_message(self, timeout=600, filter_func=None):
-        print("[*] 等待 OpenAI 验证码（TempMail.lol 轮询，最多 10 分钟）")
+        # print("[*] 等待 OpenAI 验证码（TempMail.lol 轮询，最多 10 分钟）")
         start = time.time()
         while time.time() - start < timeout:
             msgs = self._get_messages()
-            print(
-                f"[*] 已轮询 {int(time.time() - start)} 秒，收到 {len(msgs)} 封邮件..."
-            )
+            # print(
+                # f"[*] 已轮询 {int(time.time() - start)} 秒，收到 {len(msgs)} 封邮件..."
+            # )
             for msg_data in msgs:
                 msg = Message(msg_data)
                 if not filter_func or filter_func(msg):
-                    print(f"[+] 收到匹配邮件: {msg.subject}")
+                    # print(f"[+] 收到匹配邮件: {msg.subject}")
                     return msg
             time.sleep(5)
         raise TimeoutError("[-] 10 分钟内未收到 OpenAI 验证码")
@@ -298,28 +298,28 @@ def run(proxy: str) -> str:
         loc_re = re.search(r"^loc=(.+)$", trace.text, re.MULTILINE)
         ip = ip_re.group(1) if ip_re else "Unknown"
         loc = loc_re.group(1) if loc_re else "Unknown"
-        print(f"[*] 当前节点信息 -> Location: {loc}, IP: {ip}")
+        # print(f"[*] 当前节点信息 -> Location: {loc}, IP: {ip}")
         if loc in ("CN", "HK", "RU"):
             raise RuntimeError("当前 IP 位于受限地区，请切换代理节点。")
     except Exception as e:
         print(f"[!] IP 检测失败: {e}")
 
     # 2. 生成邮箱（TempMail.lol，走代理）
-    print("[*] 正在生成随机私有域名邮箱...")
+    # print("[*] 正在生成随机私有域名邮箱...")
     email, inbox = get_email(proxies=proxies)
-    print(f"[+] 成功生成邮箱: {email}")
+    # print(f"[+] 成功生成邮箱: {email}")
 
     # 3. OAuth 初始化
-    print("[*] 正在初始化 OAuth 流程...")
+    # print("[*] 正在初始化 OAuth 流程...")
     oauth = generate_oauth_url()
     s.get(oauth.auth_url)
     did = s.cookies.get("oai-did")
     if not did:
         return "[!] 错误：未能获取 oai-did Cookie"
-    print(f"[+] 获取到 oai-did: {did}")
+    # print(f"[+] 获取到 oai-did: {did}")
 
     # 4. Sentinel
-    print("[*] 正在绕过 Sentinel 验证...")
+    # print("[*] 正在绕过 Sentinel 验证...")
     signup_body = (
         f'{{"username":{{"value":"{email}","kind":"email"}},"screen_hint":"signup"}}'
     )
@@ -333,14 +333,14 @@ def run(proxy: str) -> str:
         },
         data=sen_req_body,
     )
-    print(f"[*] Sentinel 状态码: {sen_resp.status_code}")
+    # print(f"[*] Sentinel 状态码: {sen_resp.status_code}")
     if sen_resp.status_code != 200:
         return f"[!] Sentinel 验证失败。\n响应内容: {sen_resp.text}"
     sen_token = sen_resp.json().get("token", "")
     sentinel = f'{{"p": "", "t": "", "c": "{sen_token}", "id": "{did}", "flow": "authorize_continue"}}'
 
     # 5. SignUp
-    print("[*] 正在提交注册...")
+    # print("[*] 正在提交注册...")
     signup_resp = s.post(
         "https://auth.openai.com/api/accounts/authorize/continue",
         headers={
@@ -351,12 +351,12 @@ def run(proxy: str) -> str:
         },
         data=signup_body,
     )
-    print(f"[*] SignUp 状态码: {signup_resp.status_code}")
+    # print(f"[*] SignUp 状态码: {signup_resp.status_code}")
     if signup_resp.status_code != 200:
         return f"[!] SignUp 失败详细信息: {signup_resp.text}"
 
     # 6. 设置密码 + 触发 OTP
-    print("[*] Passwordless 已禁用，正在设置密码 + 触发 OTP...")
+    # print("[*] Passwordless 已禁用，正在设置密码 + 触发 OTP...")
     openai_pwd = get_password()
     reg_body = {"password": openai_pwd, "username": email}
     reg_resp = s.post(
@@ -368,10 +368,10 @@ def run(proxy: str) -> str:
         },
         json=reg_body,
     )
-    print(f"[*] 密码注册状态码: {reg_resp.status_code}")
+    # print(f"[*] 密码注册状态码: {reg_resp.status_code}")
     if reg_resp.status_code != 200:
         return f"[!] 密码注册失败: {reg_resp.text}"
-    print(f"[+] 密码设置成功（{openai_pwd}）")
+    # print(f"[+] 密码设置成功（{openai_pwd}）")
 
     time.sleep(1)
     s.get(
@@ -379,7 +379,7 @@ def run(proxy: str) -> str:
         headers={"referer": "https://auth.openai.com/create-account"},
     )
 
-    print("[*] 发送 OTP 验证码...")
+    # print("[*] 发送 OTP 验证码...")
     otp_send = s.get(
         "https://auth.openai.com/api/accounts/email-otp/send",
         headers={
@@ -388,12 +388,12 @@ def run(proxy: str) -> str:
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
         },
     )
-    print(f"[*] OTP 发送状态码: {otp_send.status_code} | 响应: {otp_send.text[:300]}")
+    # print(f"[*] OTP 发送状态码: {otp_send.status_code} | 响应: {otp_send.text[:300]}")
     if otp_send.status_code != 200:
         return f"[!] OTP 发送失败: {otp_send.text}"
 
     # 等待 OTP
-    print("[*] 正在等待邮箱 OTP 验证码...")
+    # print("[*] 正在等待邮箱 OTP 验证码...")
 
     def otp_filter(obj):
         subj = getattr(obj, "subject", "") or ""
@@ -409,7 +409,7 @@ def run(proxy: str) -> str:
     if not code_match:
         return "[!] 未在邮件中找到 6 位验证码"
     otp_code = code_match.group(1)
-    print(f"[+] 提取到 OTP: {otp_code}")
+    # print(f"[+] 提取到 OTP: {otp_code}")
 
     # 验证 OTP
     validate_resp = s.post(
@@ -421,13 +421,13 @@ def run(proxy: str) -> str:
         },
         json={"code": otp_code},
     )
-    print(f"[*] OTP 验证状态码: {validate_resp.status_code}")
+    # print(f"[*] OTP 验证状态码: {validate_resp.status_code}")
     if validate_resp.status_code != 200:
         return f"[!] OTP 验证失败: {validate_resp.text}"
-    print("[+] OTP 验证成功，继续创建账号信息...")
+    # print("[+] OTP 验证成功，继续创建账号信息...")
 
     # 7. 创建账号信息
-    print("[*] 正在创建账号信息...")
+    # print("[*] 正在创建账号信息...")
     create_account_body = '{"name":"gali","birthdate":"2000-02-20"}'
     create_account_resp = s.post(
         "https://auth.openai.com/api/accounts/create_account",
@@ -438,7 +438,7 @@ def run(proxy: str) -> str:
         },
         data=create_account_body,
     )
-    print(f"[*] 账号创建状态码: {create_account_resp.status_code}")
+    # print(f"[*] 账号创建状态码: {create_account_resp.status_code}")
     if create_account_resp.status_code != 200:
         return f"[!] 创建账号步骤失败: {create_account_resp.text}"
 
@@ -449,7 +449,7 @@ def run(proxy: str) -> str:
     auth_data = base64.b64decode(auth_cookie.split(".")[0])
     auth_json = json.loads(auth_data)
     workspace_id = auth_json["workspaces"][0]["id"]
-    print(f"[+] 提取 Workspace ID: {workspace_id}")
+    # print(f"[+] 提取 Workspace ID: {workspace_id}")
 
     # 9. 选择 Workspace
     select_body = f'{{"workspace_id":"{workspace_id}"}}'
@@ -461,13 +461,13 @@ def run(proxy: str) -> str:
         },
         data=select_body,
     )
-    print(f"[*] 选择 Workspace 状态码: {select_resp.status_code}")
+    # print(f"[*] 选择 Workspace 状态码: {select_resp.status_code}")
     if "continue_url" not in select_resp.json():
         return f"[!] 未能获取 continue_url，响应: {select_resp.text}"
     continue_url = select_resp.json()["continue_url"]
 
     # 10. 跟踪重定向获取 Callback
-    print("[*] 正在跟踪重定向获取 Token...")
+    # print("[*] 正在跟踪重定向获取 Token...")
     final_resp = s.get(continue_url, allow_redirects=False)
     final_resp = s.get(final_resp.headers.get("Location"), allow_redirects=False)
     final_resp = s.get(final_resp.headers.get("Location"), allow_redirects=False)
@@ -476,7 +476,7 @@ def run(proxy: str) -> str:
         return "[!] 错误：未能获取到最终的 Callback URL"
 
     # 11. 交换 Token
-    print("[+] 流程完成，正在交换 Token...")
+    # print("[+] 流程完成，正在交换 Token...")
     return submit_callback_url(
         callback_url=cbk,
         code_verifier=oauth.code_verifier,
