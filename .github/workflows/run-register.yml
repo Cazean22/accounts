@@ -15,6 +15,12 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Install Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -22,4 +28,5 @@ jobs:
         env:
           PROXY_URL: ${{ secrets.PROXY_URL }}
           TOKENS_URL: ${{ secrets.TOKENS_URL }}
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
         run: bun run register.ts

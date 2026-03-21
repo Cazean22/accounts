@@ -1,8 +1,7 @@
-import { appendFile } from "node:fs/promises";
-
 import { Session, type SimpleResponse } from "./session.ts";
 import { EMail, Message, type MessageData } from "./tempmail.ts";
 import { generateOAuthUrl, submitCallbackUrl } from "./oauth.ts";
+import { buildSentinel, closeBrowser } from "./sentinel.ts";
 
 // ====================== Safe JSON parsing ======================
 
@@ -52,34 +51,6 @@ function randomBirthdate(): string {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-// ====================== Sentinel helper ======================
-
-async function buildSentinel(s: Session, did: string): Promise<string> {
-  const resp = await s.post(
-    "https://sentinel.openai.com/backend-api/sentinel/req",
-    {
-      headers: {
-        origin: "https://sentinel.openai.com",
-        referer:
-          "https://sentinel.openai.com/backend-api/sentinel/frame.html?sv=20260219f9f6",
-        "content-type": "text/plain;charset=UTF-8",
-      },
-      body: JSON.stringify({ p: "", id: did, flow: "authorize_continue" }),
-    },
-  );
-  if (resp.status !== 200) {
-    throw new Error(`Sentinel verification failed: ${await resp.text()}`);
-  }
-  const data = (await safeJson(resp, "Sentinel")) as { token?: string };
-  return JSON.stringify({
-    p: "",
-    t: "",
-    c: data.token ?? "",
-    id: did,
-    flow: "authorize_continue",
-  });
-}
-
 // ====================== OTP filter ======================
 
 const otpFilter = (msg: Message) => {
@@ -117,7 +88,7 @@ async function run(proxy: string): Promise<string> {
           referer: "https://auth.openai.com/create-account",
           accept: "application/json",
           "content-type": "application/json",
-          "openai-sentinel-token": await buildSentinel(s, did),
+          "openai-sentinel-token": await buildSentinel(did),
         },
         body: JSON.stringify({
           username: { value: email, kind: "email" },
@@ -196,7 +167,7 @@ async function run(proxy: string): Promise<string> {
           referer: "https://auth.openai.com/about-you",
           accept: "application/json",
           "content-type": "application/json",
-          "openai-sentinel-token": await buildSentinel(s, did),
+          "openai-sentinel-token": await buildSentinel(did),
         },
         json: { name: randomName(), birthdate: randomBirthdate() },
       },
@@ -230,7 +201,7 @@ async function run(proxy: string): Promise<string> {
               referer: "https://auth.openai.com/log-in",
               accept: "application/json",
               "content-type": "application/json",
-              "openai-sentinel-token": await buildSentinel(s2, did2),
+              "openai-sentinel-token": await buildSentinel(did2),
             },
             body: JSON.stringify({
               username: { value: email, kind: "email" },
@@ -254,7 +225,7 @@ async function run(proxy: string): Promise<string> {
               referer: "https://auth.openai.com/log-in/password",
               accept: "application/json",
               "content-type": "application/json",
-              "openai-sentinel-token": await buildSentinel(s2, did2),
+              "openai-sentinel-token": await buildSentinel(did2),
             },
             json: { password: openaiPwd },
           },
@@ -447,6 +418,12 @@ console.log(
   "\n🚀 Starting automated registration for OpenAI Codex accounts...",
 );
 console.log("🛑 How to stop: Ctrl+C\n");
+
+process.on("SIGINT", async () => {
+  console.log("\n[*] Shutting down...");
+  await closeBrowser();
+  process.exit(0);
+});
 
 let successCount = 0;
 for (;;) {
