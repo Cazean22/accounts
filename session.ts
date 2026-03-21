@@ -1,76 +1,75 @@
-import {
-  chromium,
-  type BrowserContext,
-  type Browser,
-  type Page,
-  type Response as PWResponse,
-  type Route,
-} from "playwright";
-
 export interface SessionOptions {
   proxy?: string;
   headless?: boolean;
 }
 
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36";
+
 /**
- * HTTP session backed by a real Chromium browser via Playwright.
- *
- * All requests go through Chrome's network stack (page.goto + route.continue),
- * giving us real TLS fingerprints and cookie management. We avoid Playwright's
- * context.request.fetch() entirely because it crashes on servers that return
- * redirects with relative URLs.
+ * HTTP session using native fetch with a simple cookie jar.
  */
 export class Session {
-  private context!: BrowserContext;
-  private browser!: Browser;
-  private page!: Page;
+  /** domain -> (name -> value) */
+  private cookies = new Map<string, Map<string, string>>();
+  private proxy?: string;
 
   private constructor() {}
 
   static async create(opts: SessionOptions = {}): Promise<Session> {
     const s = new Session();
-    s.browser = await chromium.launch({
-      headless: opts.headless ?? true,
-      ...(opts.proxy ? { proxy: { server: opts.proxy } } : {}),
-    });
-    s.context = await s.browser.newContext({
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
-    });
-    s.page = await s.context.newPage();
+    s.proxy = opts.proxy;
     return s;
   }
 
-  async close(): Promise<void> {
-    await this.page?.close().catch(() => {});
-    await this.context?.close().catch(() => {});
-    await this.browser?.close().catch(() => {});
+  async close(): Promise<void> {}
+
+  async getCookie(url: string, name: string): Promise<string | undefined> {
+    const domain = new URL(url).hostname;
+    return this.cookies.get(domain)?.get(name);
   }
 
-  getCookie(url: string, name: string): Promise<string | undefined> {
-    return this.context.cookies(url).then((cookies) =>
-      cookies.find((c) => c.name === name)?.value,
-    );
+  private getCookieHeader(url: string): string {
+    const domain = new URL(url).hostname;
+    const jar = this.cookies.get(domain);
+    if (!jar || jar.size === 0) return "";
+    return Array.from(jar.entries())
+      .map(([n, v]) => `${n}=${v}`)
+      .join("; ");
   }
 
-  /**
-   * Follow a URL through its redirect chain and capture the final
-   * redirect to localhost. Uses native fetch (not the browser page)
-   * to avoid Cloudflare bot detection. Cookies are extracted from the
-   * browser context and updated from Set-Cookie headers on each hop.
-   *
-   * We cannot use context.request because it crashes on servers that
-   * return relative URLs in Set-Cookie/Location headers.
-   */
-  async followRedirectChain(
-    startUrl: string,
-  ): Promise<string | null> {
-    // Extract ALL cookies from the browser context
-    const allCookies = await this.context.cookies();
-    const cookieMap = new Map<string, string>();
-    for (const c of allCookies) {
-      cookieMap.set(c.name, c.value);
+  private storeCookies(url: string, response: Response): void {
+    const domain = new URL(url).hostname;
+    const setCookies = response.headers.getSetCookie?.() ?? [];
+    for (const sc of setCookies) {
+      const nameValue = sc.split(";")[0] ?? "";
+      const eqIdx = nameValue.indexOf("=");
+      if (eqIdx > 0) {
+        let jar = this.cookies.get(domain);
+        if (!jar) {
+          jar = new Map();
+          this.cookies.set(domain, jar);
+        }
+        jar.set(
+          nameValue.slice(0, eqIdx).trim(),
+          nameValue.slice(eqIdx + 1).trim(),
+        );
+      }
     }
+  }
+
+  private getAllCookiesFlat(): Map<string, string> {
+    const flat = new Map<string, string>();
+    for (const jar of this.cookies.values()) {
+      for (const [n, v] of jar) {
+        flat.set(n, v);
+      }
+    }
+    return flat;
+  }
+
+  async followRedirectChain(startUrl: string): Promise<string | null> {
+    const cookieMap = this.getAllCookiesFlat();
 
     let currentUrl = startUrl;
     for (let i = 0; i < 20; i++) {
@@ -82,8 +81,7 @@ export class Session {
         redirect: "manual",
         headers: {
           Cookie: cookieHeader,
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+          "User-Agent": USER_AGENT,
           Accept:
             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         },
@@ -103,14 +101,10 @@ export class Session {
       }
 
       const location = resp.headers.get("location");
-      if (!location) {
-        return null;
-      }
+      if (!location) return null;
 
       const resolved = new URL(location, currentUrl).href;
-      if (resolved.startsWith("http://localhost")) {
-        return resolved;
-      }
+      if (resolved.startsWith("http://localhost")) return resolved;
 
       currentUrl = resolved;
     }
@@ -172,105 +166,54 @@ export class Session {
     const follow = opts.followRedirects ?? true;
     const timeout = opts.timeout ?? 30_000;
 
-    // Intercept the outgoing request to modify method/headers/body.
-    // route.continue() sends the modified request through Chrome's real
-    // network stack (proper TLS, cookie jar, redirect handling).
-    const needsIntercept =
-      opts.method !== "GET" || opts.headers || opts.body;
-
-    let routeHandler: ((route: Route) => Promise<void>) | undefined;
-
-    if (needsIntercept) {
-      routeHandler = async (route: Route) => {
-        await route.continue({
-          method: opts.method,
-          headers: opts.headers
-            ? { ...route.request().headers(), ...opts.headers }
-            : undefined,
-          postData: opts.body,
-        });
+    let currentUrl = url;
+    for (let i = 0; i < (follow ? 20 : 1); i++) {
+      const cookieHeader = this.getCookieHeader(currentUrl);
+      const headers: Record<string, string> = {
+        "User-Agent": USER_AGENT,
+        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+        ...opts.headers,
       };
-      await this.page.route("**/*", routeHandler, { times: 1 });
-    }
 
-    try {
-      if (!follow) {
-        // Capture the FIRST response (the redirect) without waiting for
-        // Chrome to finish following the entire redirect chain.
-        return await this.requestNoFollow(url, timeout);
-      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeout);
 
-      // Let Chrome follow all redirects; return the final response.
-      const response = await this.page.goto(url, {
-        waitUntil: "commit",
-        timeout,
+      const resp = await fetch(currentUrl, {
+        method: i === 0 ? opts.method : "GET",
+        headers,
+        body: i === 0 ? opts.body : undefined,
+        redirect: "manual",
+        signal: controller.signal,
       });
 
-      if (!response) throw new Error("No response received");
+      clearTimeout(timer);
+      this.storeCookies(currentUrl, resp);
+
+      const status = resp.status;
+      if (follow && status >= 300 && status < 400) {
+        const location = resp.headers.get("location");
+        if (location) {
+          currentUrl = new URL(location, currentUrl).href;
+          continue;
+        }
+      }
+
+      const respHeaders: Record<string, string> = {};
+      resp.headers.forEach((v, k) => {
+        respHeaders[k] = v;
+      });
 
       return new SimpleResponse(
         {
-          status: response.status(),
-          headers: response.headers(),
-          body: await response.text().catch(() => ""),
+          status,
+          headers: respHeaders,
+          body: await resp.text().catch(() => ""),
         },
-        url,
+        currentUrl,
       );
-    } catch (e) {
-      // page.goto can fail if redirect chain ends at an unreachable URL
-      // (e.g. localhost when no server is running). Re-throw as-is.
-      throw e;
-    } finally {
-      if (routeHandler) {
-        await this.page.unroute("**/*", routeHandler).catch(() => {});
-      }
     }
-  }
 
-  /**
-   * Make a request and capture the immediate response (even if it's a 3xx).
-   * Chrome will still try to follow the redirect in the background but we
-   * don't wait for that.
-   */
-  private requestNoFollow(
-    url: string,
-    timeout: number,
-  ): Promise<SimpleResponse> {
-    return new Promise<SimpleResponse>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.page.off("response", onResponse);
-        reject(new Error(`Request timeout after ${timeout}ms`));
-      }, timeout);
-
-      const onResponse = async (response: PWResponse) => {
-        // Match on the request URL we initiated
-        if (response.request().url() !== url) return;
-
-        this.page.off("response", onResponse);
-        clearTimeout(timer);
-
-        try {
-          const body = await response.text().catch(() => "");
-          resolve(
-            new SimpleResponse(
-              {
-                status: response.status(),
-                headers: response.headers(),
-                body,
-              },
-              url,
-            ),
-          );
-        } catch (e) {
-          reject(e);
-        }
-      };
-
-      this.page.on("response", onResponse);
-
-      // Fire-and-forget the navigation; we capture the response above
-      this.page.goto(url, { timeout }).catch(() => {});
-    });
+    throw new Error("Too many redirects");
   }
 }
 
@@ -304,7 +247,6 @@ export class SimpleResponse {
     return {
       get(name: string) {
         const val = h[name.toLowerCase()] ?? null;
-        // Resolve relative Location headers to absolute URLs
         if (name.toLowerCase() === "location" && val && !val.includes("://")) {
           return new URL(val, reqUrl).href;
         }
