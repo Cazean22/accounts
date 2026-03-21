@@ -32,22 +32,22 @@ async function run(proxy: string): Promise<string> {
       const locMatch = traceText.match(/^loc=(.+)$/m);
       const ip = ipMatch?.[1] ?? "Unknown";
       const loc = locMatch?.[1] ?? "Unknown";
-      console.log(`[*] 当前节点信息 -> Location: ${loc}, IP: ${ip}`);
+      console.log(`[*] Current node info -> Location: ${loc}, IP: ${ip}`);
       if (["CN", "HK", "RU"].includes(loc)) {
-        throw new Error("当前 IP 位于受限地区，请切换代理节点。");
+        throw new Error("The current IP is in a restricted region. Please switch proxy nodes.");
       }
     } catch (e) {
-      console.log(`[!] IP 检测失败: ${e}`);
+      console.log(`[!] IP check failed: ${e}`);
     }
 
     // 2. Generate email (TempMail.lol, via proxy)
-    console.log("[*] 正在生成随机私有域名邮箱...");
+    console.log("[*] Generating a random private-domain email address...");
     const inbox = await EMail.create(proxy || undefined);
     const email = inbox.address;
-    console.log(`[+] 成功生成邮箱: ${email}`);
+    console.log(`[+] Email generated successfully: ${email}`);
 
     // 3. OAuth init
-    console.log("[*] 正在初始化 OAuth 流程...");
+    console.log("[*] Initializing OAuth flow...");
     const oauth = await generateOAuthUrl();
     try {
       await s.get(oauth.authUrl);
@@ -55,11 +55,11 @@ async function run(proxy: string): Promise<string> {
       // Expected: OAuth redirects to localhost:1455 which isn't running
     }
     const did = await s.getCookie("https://auth.openai.com", "oai-did");
-    if (!did) return "[!] 错误：未能获取 oai-did Cookie";
-    console.log(`[+] 获取到 oai-did: ${did}`);
+    if (!did) return "[!] Error: failed to retrieve oai-did cookie";
+    console.log(`[+] Retrieved oai-did: ${did}`);
 
     // 4. Sentinel
-    console.log("[*] 正在绕过 Sentinel 验证...");
+    console.log("[*] Handling Sentinel verification...");
     const signupBody = JSON.stringify({
       username: { value: email, kind: "email" },
       screen_hint: "signup",
@@ -81,9 +81,9 @@ async function run(proxy: string): Promise<string> {
         body: senReqBody,
       },
     );
-    console.log(`[*] Sentinel 状态码: ${senResp.status}`);
+    console.log(`[*] Sentinel status code: ${senResp.status}`);
     if (senResp.status !== 200) {
-      return `[!] Sentinel 验证失败。\n响应内容: ${await senResp.text()}`;
+      return `[!] Sentinel verification failed.\nResponse: ${await senResp.text()}`;
     }
     const senData = (await senResp.json()) as { token?: string };
     const senToken = senData.token ?? "";
@@ -96,7 +96,7 @@ async function run(proxy: string): Promise<string> {
     });
 
     // 5. SignUp
-    console.log("[*] 正在提交注册...");
+    console.log("[*] Submitting signup request...");
     const signupResp = await s.post(
       "https://auth.openai.com/api/accounts/authorize/continue",
       {
@@ -109,13 +109,13 @@ async function run(proxy: string): Promise<string> {
         body: signupBody,
       },
     );
-    console.log(`[*] SignUp 状态码: ${signupResp.status}`);
+    console.log(`[*] SignUp status code: ${signupResp.status}`);
     if (signupResp.status !== 200) {
-      return `[!] SignUp 失败详细信息: ${await signupResp.text()}`;
+      return `[!] SignUp failed. Details: ${await signupResp.text()}`;
     }
 
     // 6. Set password + trigger OTP
-    console.log("[*] Passwordless 已禁用，正在设置密码 + 触发 OTP...");
+    console.log("[*] Passwordless is disabled; setting password and triggering OTP...");
     const openaiPwd = getPassword();
     const regResp = await s.post(
       "https://auth.openai.com/api/accounts/user/register",
@@ -128,18 +128,18 @@ async function run(proxy: string): Promise<string> {
         json: { password: openaiPwd, username: email },
       },
     );
-    console.log(`[*] 密码注册状态码: ${regResp.status}`);
+    console.log(`[*] Password registration status code: ${regResp.status}`);
     if (regResp.status !== 200) {
-      return `[!] 密码注册失败: ${await regResp.text()}`;
+      return `[!] Password registration failed: ${await regResp.text()}`;
     }
-    console.log(`[+] 密码设置成功（${openaiPwd}）`);
+    console.log(`[+] Password set successfully (${openaiPwd})`);
 
     await Bun.sleep(1000);
     await s.get("https://auth.openai.com/create-account/password", {
       headers: { referer: "https://auth.openai.com/create-account" },
     });
 
-    console.log("[*] 发送 OTP 验证码...");
+    console.log("[*] Sending OTP verification code...");
     const otpSend = await s.get(
       "https://auth.openai.com/api/accounts/email-otp/send",
       {
@@ -151,14 +151,14 @@ async function run(proxy: string): Promise<string> {
     );
     const otpSendText = await otpSend.text();
     console.log(
-      `[*] OTP 发送状态码: ${otpSend.status} | 响应: ${otpSendText.slice(0, 300)}`,
+      `[*] OTP send status code: ${otpSend.status} | Response: ${otpSendText.slice(0, 300)}`,
     );
     if (otpSend.status !== 200) {
-      return `[!] OTP 发送失败: ${otpSendText}`;
+      return `[!] Failed to send OTP: ${otpSendText}`;
     }
 
     // Wait for OTP
-    console.log("[*] 正在等待邮箱 OTP 验证码...");
+    console.log("[*] Waiting for OTP email...");
     const otpFilter = (msg: Message) => {
       const subj = (msg.subject ?? "").toLowerCase();
       return ["openai", "验证码", "verification", "code", "otp"].some((kw) =>
@@ -169,9 +169,11 @@ async function run(proxy: string): Promise<string> {
     const codeMatch = (msg.body || msg.htmlBody || msg.subject || "").match(
       /\b(\d{6})\b/,
     );
-    if (!codeMatch?.[1]) return "[!] 未在邮件中找到 6 位验证码";
+    if (!codeMatch?.[1]) {
+      return "[!] Could not find a 6-digit verification code in the email";
+    }
     const otpCode = codeMatch[1];
-    console.log(`[+] 提取到 OTP: ${otpCode}`);
+    console.log(`[+] Extracted OTP: ${otpCode}`);
 
     // Validate OTP
     const validateResp = await s.post(
@@ -185,14 +187,46 @@ async function run(proxy: string): Promise<string> {
         json: { code: otpCode },
       },
     );
-    console.log(`[*] OTP 验证状态码: ${validateResp.status}`);
+    console.log(`[*] OTP verification status code: ${validateResp.status}`);
     if (validateResp.status !== 200) {
-      return `[!] OTP 验证失败: ${await validateResp.text()}`;
+      return `[!] OTP verification failed: ${await validateResp.text()}`;
     }
-    console.log("[+] OTP 验证成功，继续创建账号信息...");
+    console.log("[+] OTP verified successfully; continuing to create account profile...");
 
     // 7. Create account info
-    console.log("[*] 正在创建账号信息...");
+    console.log("[*] Requesting new Sentinel token for account creation...");
+    const createSenReqBody = JSON.stringify({
+      p: "",
+      id: did,
+      flow: "authorize_continue",
+    });
+    const createSenResp = await s.post(
+      "https://sentinel.openai.com/backend-api/sentinel/req",
+      {
+        headers: {
+          origin: "https://sentinel.openai.com",
+          referer:
+            "https://sentinel.openai.com/backend-api/sentinel/frame.html?sv=20260219f9f6",
+          "content-type": "text/plain;charset=UTF-8",
+        },
+        body: createSenReqBody,
+      },
+    );
+    if (createSenResp.status !== 200) {
+      return `[!] Sentinel for create_account failed: ${await createSenResp.text()}`;
+    }
+    const createSenData = (await createSenResp.json()) as { token?: string };
+    const createSenToken = createSenData.token ?? "";
+    const createSentinel = JSON.stringify({
+      p: "",
+      t: "",
+      c: createSenToken,
+      id: did,
+      flow: "authorize_continue",
+    });
+    console.log("[+] Sentinel token obtained for create_account");
+
+    console.log("[*] Creating account profile...");
     const createAccountResp = await s.post(
       "https://auth.openai.com/api/accounts/create_account",
       {
@@ -200,26 +234,51 @@ async function run(proxy: string): Promise<string> {
           referer: "https://auth.openai.com/about-you",
           accept: "application/json",
           "content-type": "application/json",
+          "openai-sentinel-token": createSentinel,
         },
         json: { name: "gali", birthdate: "2000-02-20" },
       },
     );
-    console.log(`[*] 账号创建状态码: ${createAccountResp.status}`);
+    const createAccountData = await createAccountResp.json();
+    console.log(`[*] Account creation status code: ${createAccountResp.status}`);
+    console.log(`[*] Account creation response: ${JSON.stringify(createAccountData).slice(0, 500)}`);
     if (createAccountResp.status !== 200) {
-      return `[!] 创建账号步骤失败: ${await createAccountResp.text()}`;
+      return `[!] Create-account step failed: ${JSON.stringify(createAccountData)}`;
+    }
+    console.log("[+] Account profile created successfully!");
+
+    // 8. Check if phone verification was bypassed
+    const createData = createAccountData as { continue_url?: string; page?: { type?: string } };
+    if (createData.page?.type === "add_phone") {
+      console.log("[!] Phone verification still required despite sentinel token");
+      return `[!] Phone verification required. Response: ${JSON.stringify(createAccountData).slice(0, 500)}`;
+    } else if (createData.continue_url) {
+      console.log(`[*] Following continue_url: ${createData.continue_url}`);
+      await s.get(createData.continue_url, { followRedirects: true });
     }
 
-    // 8. Get Workspace ID
+    // 9. Get Workspace ID
     const authCookie = await s.getCookie(
       "https://auth.openai.com",
       "oai-client-auth-session",
     );
-    if (!authCookie) return "[!] 错误：未能获取到 oai-client-auth-session";
-    const authData = JSON.parse(
-      Buffer.from(authCookie.split(".")[0]!, "base64").toString("utf-8"),
-    ) as { workspaces: { id: string }[] };
+    if (!authCookie) {
+      return "[!] Error: failed to retrieve oai-client-auth-session";
+    }
+    const authPayload = Buffer.from(authCookie.split(".")[0]!, "base64").toString("utf-8");
+    let authData: { workspaces?: { id: string }[] };
+    try {
+      authData = JSON.parse(authPayload);
+    } catch {
+      return `[!] Failed to parse auth cookie payload: ${authPayload.slice(0, 500)}`;
+    }
+    if (!authData.workspaces?.length) {
+      console.log(`[!] Warning: no workspaces found in auth cookie. Full parsed data: ${JSON.stringify(authData).slice(0, 500)}`);
+      return `[!] No workspaces found in auth cookie. Parsed data: ${JSON.stringify(authData).slice(0, 500)}`;
+    }
+    console.log(`[+] Parsed auth cookie successfully; found ${authData.workspaces.length} workspace(s)`);
     const workspaceId = authData.workspaces[0]!.id;
-    console.log(`[+] 提取 Workspace ID: ${workspaceId}`);
+    console.log(`[+] Extracted Workspace ID: ${workspaceId}`);
 
     // 9. Select Workspace
     const selectResp = await s.post(
@@ -233,14 +292,14 @@ async function run(proxy: string): Promise<string> {
         json: { workspace_id: workspaceId },
       },
     );
-    console.log(`[*] 选择 Workspace 状态码: ${selectResp.status}`);
+    console.log(`[*] Workspace selection status code: ${selectResp.status}`);
     const selectData = (await selectResp.json()) as { continue_url?: string };
     if (!selectData.continue_url) {
-      return `[!] 未能获取 continue_url，响应: ${JSON.stringify(selectData)}`;
+      return `[!] Failed to retrieve continue_url. Response: ${JSON.stringify(selectData)}`;
     }
 
     // 10. Follow redirects to get Callback
-    console.log("[*] 正在跟踪重定向获取 Token...");
+    console.log("[*] Following redirects to obtain token...");
     let resp = await s.get(selectData.continue_url, {
       followRedirects: false,
     });
@@ -251,10 +310,10 @@ async function run(proxy: string): Promise<string> {
       followRedirects: false,
     });
     const cbk = resp.headers.get("location");
-    if (!cbk) return "[!] 错误：未能获取到最终的 Callback URL";
+    if (!cbk) return "[!] Error: failed to retrieve the final callback URL";
 
     // 11. Exchange Token
-    console.log("[+] 流程完成，正在交换 Token...");
+    console.log("[+] Flow complete; exchanging token...");
     const result = await submitCallbackUrl({
       callbackUrl: cbk,
       codeVerifier: oauth.codeVerifier,
@@ -269,13 +328,13 @@ async function run(proxy: string): Promise<string> {
 
 // ====================== Main loop ======================
 
-const PROXY_URL = "http://127.0.0.1:7890"; // ← 改成你的 US/JP 住宅代理
+const PROXY_URL = "http://127.0.0.1:7890";
 const OUTPUT_FILE = "accounts.json";
 
 console.log(
-  "\n🚀 开始自动化无限循环注册 OpenAI Codex 账号（2026 TempMail.lol 修复代理终极版）...",
+  "\n🚀 Starting automated endless-loop registration for OpenAI Codex accounts (2026 TempMail.lol proxy-fix final version)...",
 );
-console.log("🛑 停止方法: Ctrl+C\n");
+console.log("🛑 How to stop: Ctrl+C\n");
 
 let successCount = 0;
 for (;;) {
@@ -283,11 +342,14 @@ for (;;) {
     const config = await run("");
     if (config?.startsWith("{")) {
       successCount++;
-      console.log(`[+] 第 ${successCount} 个账号注册成功！`);
+      console.log(`[+] Account #${successCount} registered successfully!`);
       await appendFile(OUTPUT_FILE, config + "\n", "utf-8");
+    } else {
+      console.log(`[-] Registration attempt failed with message: ${config}. Retrying in 3 seconds...`);
+      await Bun.sleep(3000);
     }
   } catch (e) {
-    console.log(`[-] 本次失败: ${e}，3秒后重试...`);
+    console.log(`[-] This attempt failed: ${e}. Retrying in 3 seconds...`);
     await Bun.sleep(3000);
   }
   await Bun.sleep(1000);

@@ -10,8 +10,6 @@ import secrets
 import urllib.parse
 import urllib.request
 import urllib.error
-import urllib.request
-import requests
 from typing import Any, Dict
 from dataclasses import dataclass
 
@@ -286,6 +284,23 @@ def get_tokens_url() -> str:
     return tokens_url
 
 
+def _build_sentinel(s: requests.Session, did: str) -> str:
+    """Request a sentinel token and return the serialized sentinel header value."""
+    sen_resp = s.post(
+        "https://sentinel.openai.com/backend-api/sentinel/req",
+        headers={
+            "origin": "https://sentinel.openai.com",
+            "referer": "https://sentinel.openai.com/backend-api/sentinel/frame.html?sv=20260219f9f6",
+            "content-type": "text/plain;charset=UTF-8",
+        },
+        data=json.dumps({"p": "", "id": did, "flow": "authorize_continue"}),
+    )
+    if sen_resp.status_code != 200:
+        raise RuntimeError(f"Sentinel 验证失败: {sen_resp.text}")
+    sen_token = sen_resp.json().get("token", "")
+    return json.dumps({"p": "", "t": "", "c": sen_token, "id": did, "flow": "authorize_continue"})
+
+
 # ====================== 核心主逻辑（完整 1~11 步） ======================
 def run(proxy: str) -> str:
     proxies = {"http": proxy, "https": proxy} if proxy else None
@@ -305,12 +320,12 @@ def run(proxy: str) -> str:
         print(f"[!] IP 检测失败: {e}")
 
     # 2. 生成邮箱（TempMail.lol，走代理）
-    # print("[*] 正在生成随机私有域名邮箱...")
+    print("[*] 正在生成随机私有域名邮箱...")
     email, inbox = get_email(proxies=proxies)
     # print(f"[+] 成功生成邮箱: {email}")
 
     # 3. OAuth 初始化
-    # print("[*] 正在初始化 OAuth 流程...")
+    print("[*] 正在初始化 OAuth 流程...")
     oauth = generate_oauth_url()
     s.get(oauth.auth_url)
     did = s.cookies.get("oai-did")
@@ -319,28 +334,9 @@ def run(proxy: str) -> str:
     # print(f"[+] 获取到 oai-did: {did}")
 
     # 4. Sentinel
-    # print("[*] 正在绕过 Sentinel 验证...")
-    signup_body = (
-        f'{{"username":{{"value":"{email}","kind":"email"}},"screen_hint":"signup"}}'
-    )
-    sen_req_body = f'{{"p":"","id":"{did}","flow":"authorize_continue"}}'
-    sen_resp = s.post(
-        "https://sentinel.openai.com/backend-api/sentinel/req",
-        headers={
-            "origin": "https://sentinel.openai.com",
-            "referer": "https://sentinel.openai.com/backend-api/sentinel/frame.html?sv=20260219f9f6",
-            "content-type": "text/plain;charset=UTF-8",
-        },
-        data=sen_req_body,
-    )
-    # print(f"[*] Sentinel 状态码: {sen_resp.status_code}")
-    if sen_resp.status_code != 200:
-        return f"[!] Sentinel 验证失败。\n响应内容: {sen_resp.text}"
-    sen_token = sen_resp.json().get("token", "")
-    sentinel = f'{{"p": "", "t": "", "c": "{sen_token}", "id": "{did}", "flow": "authorize_continue"}}'
+    sentinel = _build_sentinel(s, did)
 
     # 5. SignUp
-    # print("[*] 正在提交注册...")
     signup_resp = s.post(
         "https://auth.openai.com/api/accounts/authorize/continue",
         headers={
@@ -349,9 +345,8 @@ def run(proxy: str) -> str:
             "content-type": "application/json",
             "openai-sentinel-token": sentinel,
         },
-        data=signup_body,
+        json={"username": {"value": email, "kind": "email"}, "screen_hint": "signup"},
     )
-    # print(f"[*] SignUp 状态码: {signup_resp.status_code}")
     if signup_resp.status_code != 200:
         return f"[!] SignUp 失败详细信息: {signup_resp.text}"
 
@@ -426,40 +421,49 @@ def run(proxy: str) -> str:
         return f"[!] OTP 验证失败: {validate_resp.text}"
     # print("[+] OTP 验证成功，继续创建账号信息...")
 
-    # 7. 创建账号信息
-    # print("[*] 正在创建账号信息...")
-    create_account_body = '{"name":"gali","birthdate":"2000-02-20"}'
+    # 7. 创建账号信息（带 Sentinel token）
+    create_sentinel = _build_sentinel(s, did)
     create_account_resp = s.post(
         "https://auth.openai.com/api/accounts/create_account",
         headers={
             "referer": "https://auth.openai.com/about-you",
             "accept": "application/json",
             "content-type": "application/json",
+            "openai-sentinel-token": create_sentinel,
         },
-        data=create_account_body,
+        json={"name": "gali", "birthdate": "2000-02-20"},
     )
-    # print(f"[*] 账号创建状态码: {create_account_resp.status_code}")
+    create_data = create_account_resp.json()
+    print(f"[*] 账号创建状态码: {create_account_resp.status_code}")
+    print(f"[*] 账号创建响应: {json.dumps(create_data)[:500]}")
     if create_account_resp.status_code != 200:
         return f"[!] 创建账号步骤失败: {create_account_resp.text}"
+
+    page_type = create_data.get("page", {}).get("type", "")
+    if page_type == "add_phone":
+        return "[!] 服务器要求手机验证，sentinel token 未能跳过"
 
     # 8. 获取 Workspace ID
     auth_cookie = s.cookies.get("oai-client-auth-session")
     if not auth_cookie:
         return "[!] 错误：未能获取到 oai-client-auth-session"
-    auth_data = base64.b64decode(auth_cookie.split(".")[0])
-    auth_json = json.loads(auth_data)
-    workspace_id = auth_json["workspaces"][0]["id"]
-    # print(f"[+] 提取 Workspace ID: {workspace_id}")
+    try:
+        auth_json = json.loads(base64.b64decode(auth_cookie.split(".")[0]))
+    except Exception:
+        return f"[!] 无法解析 auth cookie: {auth_cookie[:200]}"
+    workspaces = auth_json.get("workspaces", [])
+    if not workspaces:
+        return f"[!] auth cookie 中无 workspaces: {json.dumps(auth_json)[:500]}"
+    workspace_id = workspaces[0]["id"]
 
     # 9. 选择 Workspace
-    select_body = f'{{"workspace_id":"{workspace_id}"}}'
     select_resp = s.post(
         "https://auth.openai.com/api/accounts/workspace/select",
         headers={
             "referer": "https://auth.openai.com/sign-in-with-chatgpt/codex/consent",
             "content-type": "application/json",
         },
-        data=select_body,
+        json={"workspace_id": workspace_id},
     )
     # print(f"[*] 选择 Workspace 状态码: {select_resp.status_code}")
     if "continue_url" not in select_resp.json():
@@ -489,7 +493,7 @@ def run(proxy: str) -> str:
 if __name__ == "__main__":
     PROXY_URL = "http://127.0.0.1:7897"  # ← 改成你的 US/JP 住宅代理
     OUTPUT_FILE = "accounts.json"
-    TOKENS_URL = get_tokens_url()
+    TOKENS_URL = get_tokens_url()  # 从环境变量获取服务器 URL
 
     print(
         "\n🚀 开始自动化无限循环注册 OpenAI Codex 账号（2026 TempMail.lol 修复代理终极版）..."
@@ -518,6 +522,8 @@ if __name__ == "__main__":
                     print(
                         f"[!] 发送账号信息失败，状态码: {req.status_code}, 响应: {req.text}\n"
                     )
+            else:
+                print(f"[-] 注册流程返回异常结果: {config}\n")
         except Exception as e:
             print(f"[-] 本次失败: {e}，3秒后重试...")
             time.sleep(3)
