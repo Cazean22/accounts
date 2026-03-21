@@ -9,11 +9,6 @@ export const PKCE_CODE_CHALLENGE_METHOD = "S256" as const;
 
 const requiredTrimmedStringSchema = z.string().trim().min(1);
 
-const trimmedOptionalStringSchema = z
-  .string()
-  .optional()
-  .transform((value) => value?.trim() ?? "");
-
 const optionalTrimmedStringSchema = z.preprocess((value) => {
   if (typeof value === "string") {
     return value.trim();

@@ -53,6 +53,71 @@ export class Session {
     );
   }
 
+  /**
+   * Follow a URL through its redirect chain and capture the final
+   * redirect to localhost. Uses native fetch (not the browser page)
+   * to avoid Cloudflare bot detection. Cookies are extracted from the
+   * browser context and updated from Set-Cookie headers on each hop.
+   *
+   * We cannot use context.request because it crashes on servers that
+   * return relative URLs in Set-Cookie/Location headers.
+   */
+  async followRedirectChain(
+    startUrl: string,
+  ): Promise<string | null> {
+    // Extract ALL cookies from the browser context
+    const allCookies = await this.context.cookies();
+    const cookieMap = new Map<string, string>();
+    for (const c of allCookies) {
+      cookieMap.set(c.name, c.value);
+    }
+
+    let currentUrl = startUrl;
+    for (let i = 0; i < 20; i++) {
+      const cookieHeader = Array.from(cookieMap.entries())
+        .map(([name, value]) => `${name}=${value}`)
+        .join("; ");
+
+      const resp = await fetch(currentUrl, {
+        redirect: "manual",
+        headers: {
+          Cookie: cookieHeader,
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+      });
+
+      // Update cookies from Set-Cookie headers
+      const setCookies = resp.headers.getSetCookie?.() ?? [];
+      for (const sc of setCookies) {
+        const nameValue = sc.split(";")[0] ?? "";
+        const eqIdx = nameValue.indexOf("=");
+        if (eqIdx > 0) {
+          cookieMap.set(
+            nameValue.slice(0, eqIdx).trim(),
+            nameValue.slice(eqIdx + 1).trim(),
+          );
+        }
+      }
+
+      const location = resp.headers.get("location");
+      if (!location) {
+        return null;
+      }
+
+      const resolved = new URL(location, currentUrl).href;
+      if (resolved.startsWith("http://localhost")) {
+        return resolved;
+      }
+
+      currentUrl = resolved;
+    }
+
+    return null;
+  }
+
   async get(
     url: string,
     opts?: {

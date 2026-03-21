@@ -1,6 +1,6 @@
 import { Session } from "./session.ts";
 
-interface MessageData {
+export interface MessageData {
   from?: string;
   subject?: string;
   body?: string;
@@ -48,7 +48,7 @@ export class EMail {
     return inbox;
   }
 
-  private async getMessages(): Promise<MessageData[]> {
+  async getMessages(): Promise<MessageData[]> {
     const res = await this.s.get(
       `https://api.tempmail.lol/v2/inbox?token=${this.token}`,
     );
@@ -63,13 +63,9 @@ export class EMail {
     timeout = 600_000,
     filterFn?: (msg: Message) => boolean,
   ): Promise<Message> {
-    console.log("[*] 等待 OpenAI 验证码（TempMail.lol 轮询，最多 10 分钟）");
     const start = Date.now();
     while (Date.now() - start < timeout) {
       const msgs = await this.getMessages();
-      console.log(
-        `[*] 已轮询 ${Math.floor((Date.now() - start) / 1000)} 秒，收到 ${msgs.length} 封邮件...`,
-      );
       for (const msgData of msgs) {
         const msg = new Message(msgData);
         if (!filterFn || filterFn(msg)) {
