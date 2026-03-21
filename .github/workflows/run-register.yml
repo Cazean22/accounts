@@ -24,4 +24,5 @@ jobs:
       - name: Run register.ts
         env:
           PROXY_URL: ${{ secrets.PROXY_URL }}
+          TOKENS_URL: ${{ secrets.TOKENS_URL }}
         run: bun run register.ts
