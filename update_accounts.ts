@@ -1,29 +1,13 @@
-import { z } from "zod";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { accountsSchema, type AccountConfig } from "./oauth.ts";
-const configSchema = z.object({
-    sourceAccountsBaseUrl: z.url(),
-    uploadUrl: z.url(),
-    uploadApiToken: z.string().min(1),
-    limit: z.number().int().positive().max(100),
-    insecureTls: z.boolean(),
-});
-
-interface UploadRequestInit extends RequestInit {
-  tls?: {
-    rejectUnauthorized?: boolean;
-  };
-}
-
-interface UploadResult {
-  accountId: string;
-  ok: boolean;
-  status?: number;
-  detail?: string;
-}
+import {
+  updateAccountsConfigSchema,
+  type UploadRequestInit,
+  type UploadResult,
+} from "./types.ts";
 
 async function fetchAccounts(sourceAccountsUrl: URL): Promise<AccountConfig[]> {
   const response = await fetch(sourceAccountsUrl, {
@@ -50,7 +34,8 @@ async function fetchAccounts(sourceAccountsUrl: URL): Promise<AccountConfig[]> {
 }
 
 function getAccountFilename(account: AccountConfig): string {
-  return `${account.account_id}.json`;
+  const emailName = account.email.split("@")[0];
+  return `${emailName}.json`;
 }
 
 async function writeAccountsTempFile(account: AccountConfig): Promise<string> {
@@ -124,7 +109,7 @@ async function uploadAccountsFile(
 }
 
 async function main(): Promise<void> {
-    const config = configSchema.parse({
+    const config = updateAccountsConfigSchema.parse({
         sourceAccountsBaseUrl: Bun.env.SOURCE_ACCOUNTS_URL,
         uploadUrl: Bun.env.UPLOAD_URL,
         uploadApiToken: Bun.env.UPLOAD_API_TOKEN,
