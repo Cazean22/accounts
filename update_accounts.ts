@@ -25,7 +25,7 @@ interface UploadResult {
   detail?: string;
 }
 
-async function fetchAccounts(sourceAccountsUrl: string): Promise<AccountConfig[]> {
+async function fetchAccounts(sourceAccountsUrl: URL): Promise<AccountConfig[]> {
   const response = await fetch(sourceAccountsUrl, {
     method: "GET",
     headers: {
@@ -133,7 +133,7 @@ async function main(): Promise<void> {
     });
     const sourceUrl = new URL(config.sourceAccountsBaseUrl);
     sourceUrl.searchParams.set("limit", String(config.limit));
-    const accounts = await fetchAccounts(config.sourceAccountsBaseUrl);
+    const accounts = await fetchAccounts(sourceUrl);
     const uploadResults: UploadResult[] = [];
 
     for (const account of accounts) {
