@@ -49,18 +49,17 @@ export const oauthTokenResponseSchema = z
     expires_in: nonNegativeIntegerSchema.optional().default(0),
     token_type: optionalTrimmedStringSchema,
     scope: optionalTrimmedStringSchema,
-  })
-  .passthrough();
+  });
 
 export const accountSchema = z.object({
   id_token: z.string(),
   access_token: z.string(),
   refresh_token: z.string(),
-  account_id: z.string().uuid(),
-  last_refresh: z.string().datetime({ offset: true }),
-  email: z.string().email(),
+  account_id: z.uuid(),
+  last_refresh: z.iso.datetime({ offset: true }),
+  email: z.email(),
   type: z.string(),
-  expired: z.string().datetime({ offset: true }),
+  expired: z.iso.datetime({ offset: true }),
 });
 
 export const accountsSchema = z.array(accountSchema);
