@@ -5,6 +5,7 @@ import {
 } from "./types.ts";
 import { accountSchema, accountsSchema, type AccountConfig } from "./oauth.ts";
 import z from "zod";
+import { appendUrlPath } from "./utils.ts";
 
 const CONCURRENCY = 10;
 const COMPARE_FIELDS = ["email", "type", "last_refresh", "expired"] as const;
@@ -87,18 +88,6 @@ type EntryOutcome =
 
 function createFailure(detail: string, status?: number): OperationFailure {
   return status === undefined ? { ok: false, detail } : { ok: false, detail, status };
-}
-
-function appendUrlPath(baseUrl: string, path: string): URL {
-  const url = new URL(baseUrl);
-  const normalizedBasePath = url.pathname.endsWith("/")
-    ? url.pathname
-    : `${url.pathname}/`;
-  const normalizedPath = path.startsWith("/") ? path.slice(1) : path;
-
-  url.pathname = `${normalizedBasePath}${normalizedPath}`;
-
-  return url;
 }
 
 function makeHeaders(config: CleanConfig): Headers {

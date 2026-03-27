@@ -8,6 +8,7 @@ import {
   type UploadRequestInit,
   type UploadResult,
 } from "./types.ts";
+import { appendUrlPath } from "./utils.ts";
 
 async function fetchAccounts(sourceAccountsUrl: URL): Promise<AccountConfig[]> {
   const response = await fetch(sourceAccountsUrl, {
@@ -110,13 +111,13 @@ async function uploadAccountsFile(
 
 async function main(): Promise<void> {
     const config = updateAccountsConfigSchema.parse({
-        sourceAccountsBaseUrl: Bun.env.SOURCE_ACCOUNTS_URL,
+        sourceAccountsBaseUrl: Bun.env.D1_WORKER_URL,
         uploadUrl: Bun.env.UPLOAD_URL,
         uploadApiToken: Bun.env.UPLOAD_API_TOKEN,
         limit: parseInt(Bun.env.UPDATE_ACCOUNTS_LIMIT ?? "100", 10),
         insecureTls: Bun.env.INSECURE_TLS === "true",
     });
-    const sourceUrl = new URL(config.sourceAccountsBaseUrl);
+    const sourceUrl = appendUrlPath(config.sourceAccountsBaseUrl, "tokens/random");
     sourceUrl.searchParams.set("limit", String(config.limit));
     const accounts = await fetchAccounts(sourceUrl);
     const uploadResults: UploadResult[] = [];
