@@ -8,7 +8,7 @@ import z from "zod";
 import { appendUrlPath } from "./utils.ts";
 
 const CONCURRENCY = 10;
-const COMPARE_FIELDS = ["email", "type", "last_refresh", "expired"] as const;
+const COMPARE_FIELDS = ["access_token", "refresh_token", "last_refresh", "expired"] as const;
 
 const cleanConfigSchema = z.object({
   uploadUrl: z.url(),
@@ -477,8 +477,8 @@ async function processAuthFileEntry(
   const parsedStatusMessage = parseStatusMessage(entry.status_message);
 
   if (parsedStatusMessage?.status === 401) {
-    const deleteD1Result = await deleteTokenFromD1(config, localAccount.account_id);
     const deleteLocalResult = await deleteLocalAuthFile(config, entry);
+    const deleteD1Result = await deleteTokenFromD1(config, localAccount.account_id);
 
     if (!deleteLocalResult.ok) {
       return {
